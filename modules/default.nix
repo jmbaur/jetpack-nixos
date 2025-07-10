@@ -166,13 +166,6 @@ in
         type = types.bool;
         description = "Enable boot.kernelParams default console configuration";
       };
-
-      container-toolkit.enable = mkOption {
-        default = nvidiaDockerActive || nvidiaPodmanActive;
-        defaultText = "false";
-        type = types.bool;
-        description = "Enable dynamic CDI configuration for Jetson devices.";
-      };
     };
   };
 
@@ -197,12 +190,8 @@ in
           '';
         }
         {
-          assertion = (config.virtualisation.docker.enable && cfg.container-toolkit.enable) -> lib.versionAtLeast config.virtualisation.docker.package.version "25";
+          assertion = (config.virtualisation.docker.enable && config.hardware.nvidia-container-toolkit.enable) -> lib.versionAtLeast config.virtualisation.docker.package.version "25";
           message = "Docker version < 25 does not support CDI";
-        }
-        {
-          assertion = !config.hardware.nvidia-container-toolkit.enable;
-          message = "hardware.nvidia-container-toolkit.enable does not work with jetson devices (yet), use hardware.nvidia-jetpack.container-toolkit.enable instead";
         }
         (validSomsAssertion "5" [ "xavier" "orin" ])
         (validSomsAssertion "6" [ "orin" ])
@@ -435,27 +424,12 @@ in
         otaUtils # Tools for UEFI capsule updates
       ];
 
-      systemd.services.nvidia-cdi-generate = lib.mkIf cfg.container-toolkit.enable {
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          RuntimeDirectory = "cdi";
-        };
-        wantedBy = [ "multi-user.target" ];
-        script =
-          let
-            exe = lib.getExe pkgs.nvidia-jetpack.nvidia-ctk;
-          in
-          ''
-            ${exe} cdi generate \
-              --nvidia-ctk-path=${exe} \
-              --driver-root=${pkgs.nvidia-jetpack.containerDeps} \
-              --ldconfig-path ${lib.getExe' pkgs.glibc "ldconfig"} \
-              --dev-root=/ \
-              --mode=csv \
-              $(for f in ${pkgs.nvidia-jetpack.l4tCsv}/*; do echo "--csv.file=$f"; done) \
-              --output="$RUNTIME_DIRECTORY/jetpack-nixos"
-          '';
+      hardware.nvidia-container-toolkit = lib.mkIf (nvidiaDockerActive || nvidiaPodmanActive) {
+        enable = true;
+        discovery-mode = "csv";
+        suppressNvidiaDriverAssertion = lib.mkDefault true;
+        extraArgs = [ "--driver-root=${pkgs.nvidia-jetpack.containerDeps}" ];
+        csv-files = [pkgs.nvidia-jetpack.l4tCsv];
       };
 
       # Used by libEGL_nvidia.so.0
